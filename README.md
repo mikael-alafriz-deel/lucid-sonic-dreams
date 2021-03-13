@@ -3,7 +3,7 @@ Lucid Sonic Dreams syncs GAN-generated visuals to music. By default, it uses [NV
 
 ## Installation  
   
-This implementation has been teston on Python 3.6 and 3.7. As per NVLabs' TensorFlow implementation of StyleGAN2, TensorFlow 1.14 is required (TensorFlow 1.15 is also supported on Linux). TensorFlow 2.x is not supported.
+This implementation has been teston on Python 3.6 and 3.7. As per NVLabs' TensorFlow implementation of StyleGAN2, TensorFlow 1.15 is required. TensorFlow 2.x is not supported.
 
 To install, simply run: 
 
