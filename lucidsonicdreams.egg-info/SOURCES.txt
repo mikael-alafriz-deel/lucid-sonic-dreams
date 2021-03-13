@@ -1,0 +1,12 @@
+README.md
+setup.cfg
+setup.py
+lucidsonicdreams/__init__.py
+lucidsonicdreams/helper_functions.py
+lucidsonicdreams/main.py
+lucidsonicdreams/sample_effects.py
+lucidsonicdreams.egg-info/PKG-INFO
+lucidsonicdreams.egg-info/SOURCES.txt
+lucidsonicdreams.egg-info/dependency_links.txt
+lucidsonicdreams.egg-info/requires.txt
+lucidsonicdreams.egg-info/top_level.txt

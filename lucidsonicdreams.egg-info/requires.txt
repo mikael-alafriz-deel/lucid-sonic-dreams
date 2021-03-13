@@ -1,0 +1,14 @@
+tensorflow==1.15
+librosa
+numpy
+moviepy
+Pillow
+tqdm
+scipy
+scikit-image
+pygit2
+gdown
+mega.py
+requests
+pandas
+SoundFile
