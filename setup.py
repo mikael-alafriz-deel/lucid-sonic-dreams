@@ -7,14 +7,14 @@ with open('requirements.txt') as f:
 
 setuptools.setup(
     name="lucidsonicdreams", 
-    version="0.1",
+    version="0.2",
     author="Alain Mikael Alafriz",
     author_email="mikaelalafriz@gmail.com",
     description="Syncs GAN-generated visuals to music",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/mikaelalafriz/lucid-sonic-dreams",
-    download_url="https://github.com/mikaelalafriz/lucid-sonic-dreams/archive/v_01.tar.gz",
+    download_url="https://github.com/mikaelalafriz/lucid-sonic-dreams/archive/v_02.tar.gz",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
