@@ -1,0 +1,16 @@
+tensorflow==1.15
+librosa==0.8.0
+numpy==1.19.5
+moviepy==1.0.3
+Pillow==8.1.2
+tqdm==4.59.0
+scipy==1.5.4
+scikit-image==0.17.2
+pygit2==1.5.0
+gdown==3.12.2
+mega.py==1.0.8
+requests==2.21.0
+pandas==0.24.2
+SoundFile==0.10.3.post1
+google-colab==1.0.0
+notebook==5.2.2
