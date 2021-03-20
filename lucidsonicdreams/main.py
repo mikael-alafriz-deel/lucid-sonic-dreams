@@ -9,7 +9,6 @@ import random
 from scipy.stats import truncnorm
 
 import torch
-import tensorflow as tf
 import PIL
 from PIL import Image
 import skimage.exposure
