@@ -1,0 +1,7 @@
+# folders
+lucidsonicdreams/__pycache__/
+stylegan2/
+
+# files
+*.mp3
+*.mp4

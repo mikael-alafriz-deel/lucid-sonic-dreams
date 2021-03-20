@@ -8,6 +8,7 @@ import numpy as np
 import random
 from scipy.stats import truncnorm
 
+import torch
 import tensorflow as tf
 import PIL
 from PIL import Image
@@ -23,15 +24,15 @@ from .sample_effects import *
 
 # Clone Official StyleGAN2-ADA Repository
 if not os.path.exists('stylegan2'):
-  pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+  #pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+  #                        'stylegan2')
+  pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada-pytorch.git',
                           'stylegan2')
 
-#StyleGAN2 Imports
-cwd = os.getcwd()
-os.chdir('stylegan2')
+# StyleGan2 imports
+sys.path.append("stylegan2")
+import legacy
 import dnnlib
-from dnnlib.tflib.tfutil import * 
-os.chdir(cwd)
 
 
 def show_styles():
@@ -89,7 +90,7 @@ class LucidSonicDream:
     style = self.style
 
     # Initialize TensorFlow
-    init_tf() 
+    #init_tf() 
 
     # If style is not a .pkl file path, download weights from corresponding URL
     if '.pkl' not in style:
@@ -121,14 +122,15 @@ class LucidSonicDream:
     else:
       weights_file = style
 
-    # Load weights
-    with open(weights_file, 'rb') as f:
-      self.Gs = pickle.load(f)[2]
-      
+    # load generator
+    print(f'Loading networks from {weights_file}...')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    with dnnlib.util.open_url(weights_file) as f:
+        self.Gs = legacy.load_network_pkl(f)['G_ema'].to(device) # type: ignore
+    
     # Auto assign num_possible_classes attribute
     try:
-      self.num_possible_classes = self.Gs.components.mapping\
-                                  .input_templates[1].shape[1]
+      self.num_possible_classes = self.Gs.mapping.input_templates[1].shape[1]
     except ValueError:
       self.num_possible_classes = self.Gs.components.mapping\
                                   .static_kwargs.label_size
@@ -494,16 +496,15 @@ class LucidSonicDream:
     resolution = self.resolution
     batch_size = self.batch_size
     num_frame_batches = int(len(self.noise)/batch_size)
-    Gs_syn_kwargs = {'output_transform': {'func': convert_images_to_uint8, 
-                                          'nchw_to_nhwc': True},
-                    'randomize_noise': False,
-                    'minibatch_size': batch_size}
+    Gs_syn_kwargs = {'noise_mode': 'const'} # random, const, None
 
     # Set-up temporary frame directory
     self.frames_dir = file_name.split('.mp4')[0] + '_frames'
     if os.path.exists(self.frames_dir):
       shutil.rmtree(self.frames_dir)
     os.makedirs(self.frames_dir)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Generate frames
     for i in tqdm(range(num_frame_batches), position=0, leave=True):
@@ -519,26 +520,26 @@ class LucidSonicDream:
           
         # Otherwise, generate frames with StyleGAN(2)
         else:
+          noise_batch = torch.from_numpy(noise_batch).to(device)
+          w_batch = self.Gs.mapping(noise_batch, None)
+          #                       np.tile(class_batch, (batch_size, 1)))
 
-          w_batch = self.Gs.components\
-                    .mapping.run(noise_batch,
-                                 np.tile(class_batch, (batch_size, 1)))
-
-          image_batch = self.Gs.components\
-                        .synthesis.run(w_batch, **Gs_syn_kwargs)
+          with torch.no_grad():
+            image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs).detach().cpu()
 
         # For each image in generated batch: apply effects, resize, and save
         for j, image in enumerate(image_batch):   
 
-          array = np.array(image)
+          img = (image_batch.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
+          array = np.array(img)
 
           # Apply efects
           for effect in self.custom_effects:
             array = effect.apply_effect(array = array, 
                                         index = (i*batch_size)+j)
             
-          final_image = Image.fromarray(array)
-
+          final_image = Image.fromarray(array, 'RGB')
+          
           # If resolution is provided, resize
           if resolution:
             final_image = final_image.resize((resolution, resolution))
