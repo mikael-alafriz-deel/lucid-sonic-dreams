@@ -5,3 +5,5 @@ stylegan2/
 # files
 *.mp3
 *.mp4
+*.pkl
+gen.py

@@ -17,29 +17,43 @@ import soundfile
 import moviepy.editor as mpy
 from moviepy.audio.AudioClip import AudioArrayClip
 import pygit2
+from importlib import import_module
 
 from .helper_functions import * 
 from .sample_effects import *
 
-# Clone Official StyleGAN2-ADA Repository
-if not os.path.exists('stylegan2'):
-  #pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
-  #                        'stylegan2')
-  pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada-pytorch.git',
-                          'stylegan2')
+def import_stylegan_torch():
+    # Clone Official StyleGAN2-ADA Repository
+    if not os.path.exists('stylegan2'):
+      #pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+      #                        'stylegan2')
+        pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada-pytorch.git',
+                              'stylegan2')
+    # StyleGan2 imports
+    sys.path.append("stylegan2")
+    import legacy
+    import dnnlib
 
-# StyleGan2 imports
-sys.path.append("stylegan2")
-import legacy
-import dnnlib
+
+def import_stylegan_tf():
+    print("Cloning tensorflow...")
+    if not os.path.exists('stylegan2_tf'):
+        pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+                          'stylegan2_tf')
+
+    #StyleGAN2 Imports
+    sys.path.append("stylegan2_tf")
+    import dnnlib as dnnlib
+    from dnnlib.tflib.tfutil import convert_images_to_uint8 as convert_images_to_uint8
+    init_tf()
 
 
 def show_styles():
-  '''Show names of available (non-custom) styles'''
+    '''Show names of available (non-custom) styles'''
 
-  all_models = consolidate_models()
-  styles = set([model['name'].lower() for model in all_models])
-  print(*styles, sep='\n')
+    all_models = consolidate_models()
+    styles = set([model['name'].lower() for model in all_models])
+    print(*styles, sep='\n')
 
 
 class LucidSonicDream:
@@ -54,21 +68,21 @@ class LucidSonicDream:
                input_shape: int = None,
                num_possible_classes: int = None): 
 
-    # If style is a function, raise exception if function does not take 
-    # noise_batch or class_batch parameters
+      # If style is a function, raise exception if function does not take 
+      # noise_batch or class_batch parameters
     if callable(style):
      
-      func_sig = list(inspect.getfullargspec(style))[0]
+        func_sig = list(inspect.getfullargspec(style))[0]
 
-      for arg in ['noise_batch', 'class_batch']:
-        if arg not in func_sig:
-          sys.exit('func must be a function with parameters '\
-                   'noise_batch and class_batch')
-          
-      # Raise exception if input_shape or num_possible_classes is not provided
-      if (input_shape is None) or (num_possible_classes is None):
-        sys.exit('input_shape and num_possible_classes '\
-                 'must be provided if style is a function')
+        for arg in ['noise_batch', 'class_batch']:
+            if arg not in func_sig:
+                sys.exit('func must be a function with parameters '\
+                       'noise_batch and class_batch')
+
+        # Raise exception if input_shape or num_possible_classes is not provided
+        if (input_shape is None) or (num_possible_classes is None):
+            sys.exit('input_shape and num_possible_classes '\
+                     'must be provided if style is a function')
 
     # Define attributes
     self.song = song
@@ -82,6 +96,40 @@ class LucidSonicDream:
     self.num_possible_classes = num_possible_classes 
     self.style_exists = False
     
+    # some stylegan models cannot be converted to pytorch (wikiart)
+    self.use_tf = style in ("wikiart",)
+    if self.use_tf:
+        #import_stylegan_tf()
+        print("Cloning tensorflow...")
+        if not os.path.exists('stylegan2_tf'):
+            pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+                              'stylegan2_tf')
+
+        #StyleGAN2 Imports
+        sys.path.append("stylegan2_tf")
+        self.dnnlib = import_module("dnnlib")
+        #import dnnlib as dnnlib
+        #from dnnlib.tflib.tfutil import convert_images_to_uint8
+        tflib = import_module("dnnlib.tflib.tfutil")
+        self.convert_images_to_uint8 = tflib.convert_images_to_uint8#import_module("dnnlib.tflib.tfutil", fromlist=["convert_images_to_uint8"])
+        self.init_tf = tflib.init_tf #import_module("dnnlib.tflib.tfutil", fromlist=["init_tf"])
+        self.init_tf()
+        #init_tf()
+    else:
+        #import_stylegan_torch()
+        # Clone Official StyleGAN2-ADA Repository
+        if not os.path.exists('stylegan2'):
+          #pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada.git',
+          #                        'stylegan2')
+            pygit2.clone_repository('https://github.com/NVlabs/stylegan2-ada-pytorch.git',
+                                  'stylegan2')
+        # StyleGan2 imports
+        sys.path.append("stylegan2")
+        #import legacy
+        #import dnnlib
+        self.dnnlib = import_module("dnnlib")
+        self.legacy = import_module("legacy")
+    
 
   def stylegan_init(self):
     '''Initialize StyleGAN(2) weights'''
@@ -89,7 +137,8 @@ class LucidSonicDream:
     style = self.style
 
     # Initialize TensorFlow
-    #init_tf() 
+    #if self.use_tf:
+    #    init_tf() 
 
     # If style is not a .pkl file path, download weights from corresponding URL
     if '.pkl' not in style:
@@ -122,19 +171,26 @@ class LucidSonicDream:
       weights_file = style
 
     # load generator
-    print(f'Loading networks from {weights_file}...')
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    with dnnlib.util.open_url(weights_file) as f:
-        self.Gs = legacy.load_network_pkl(f)['G_ema'].to(device) # type: ignore
+    if self.use_tf:
+        # Load weights
+        with open(weights_file, 'rb') as f:
+            self.Gs = pickle.load(f)[2]
+    else:
+        print(f'Loading networks from {weights_file}...')
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        with self.dnnlib.util.open_url(weights_file) as f:
+            self.Gs = self.legacy.load_network_pkl(f)['G_ema'].to(device) # type: ignore
     
     # Auto assign num_possible_classes attribute
     try:
+      print(self.Gs.mapping.input_templates)
       self.num_possible_classes = self.Gs.mapping.input_templates[1].shape[1]
     except ValueError:
+      print(self.Gs.mapping.static_kwargs.label_size)
       self.num_possible_classes = self.Gs.components.mapping\
                                   .static_kwargs.label_size
-    except:
-      self.num_possible_classes = 0
+    except Exception:
+      self.num_possible_classes = 0      
 
 
   def load_specs(self):
@@ -209,7 +265,7 @@ class LucidSonicDream:
 
   def transform_classes(self):
     '''Transform/assign value of classes'''
-
+    print("Num classes of model: ", self.num_possible_classes)
     # If model does not use classes, simply return list of 0's
     if self.num_possible_classes == 0:
       self.classes = [0]*12
@@ -487,20 +543,25 @@ class LucidSonicDream:
                           n_mels = self.input_shape, 
                           hop_length = self.frame_duration)
 
-
   def generate_frames(self):
     '''Generate GAN output for each frame of video'''
 
     file_name = self.file_name
     resolution = self.resolution
     batch_size = self.batch_size
-    num_frame_batches = int(len(self.noise)/batch_size)
-    Gs_syn_kwargs = {'noise_mode': 'const'} # random, const, None
+    num_frame_batches = int(len(self.noise) / batch_size)
+    if self.use_tf:
+        Gs_syn_kwargs = {'output_transform': {'func': self.convert_images_to_uint8, 
+                                          'nchw_to_nhwc': True},
+                    'randomize_noise': False,
+                    'minibatch_size': batch_size}
+    else:
+        Gs_syn_kwargs = {'noise_mode': 'const'} # random, const, None
 
     # Set-up temporary frame directory
     self.frames_dir = file_name.split('.mp4')[0] + '_frames'
     if os.path.exists(self.frames_dir):
-      shutil.rmtree(self.frames_dir)
+        shutil.rmtree(self.frames_dir)
     os.makedirs(self.frames_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -514,41 +575,46 @@ class LucidSonicDream:
 
         # If style is a custom function, pass batches to the function
         if callable(self.style): 
-          image_batch = self.style(noise_batch=noise_batch, 
+            image_batch = self.style(noise_batch=noise_batch, 
                                    class_batch=class_batch)
-          
         # Otherwise, generate frames with StyleGAN(2)
         else:
-          noise_batch = torch.from_numpy(noise_batch).to(device)
-          w_batch = self.Gs.mapping(noise_batch, None)
-          #                       np.tile(class_batch, (batch_size, 1)))
-
-          with torch.no_grad():
-            image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs).detach().cpu()
+            if self.use_tf:
+                w_batch = self.Gs.components.mapping.run(noise_batch, np.tile(class_batch, (batch_size, 1)))
+                image_batch = self.Gs.components.synthesis.run(w_batch, **Gs_syn_kwargs)
+            else:
+                noise_batch = torch.from_numpy(noise_batch).to(device)
+                w_batch = self.Gs.mapping(noise_batch, class_batch)
+                with torch.no_grad():
+                    image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs).detach().cpu()
 
         # For each image in generated batch: apply effects, resize, and save
-        for j, image in enumerate(image_batch):   
+        for j, image in enumerate(image_batch): 
+            image_index = (i * batch_size) + j
+            if not self.use_tf:
+                image = (image.permute(1, 2, 0) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
+            array = np.array(image)
 
-          img = (image_batch.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
-          array = np.array(img)
+            # Apply efects
+            for effect in self.custom_effects:
+                array = effect.apply_effect(array = array, 
+                                            index = image_index)
 
-          # Apply efects
-          for effect in self.custom_effects:
-            array = effect.apply_effect(array = array, 
-                                        index = (i*batch_size)+j)
-            
-          final_image = Image.fromarray(array, 'RGB')
-          
-          # If resolution is provided, resize
-          if resolution:
-            final_image = final_image.resize((resolution, resolution))
+            final_image = Image.fromarray(array, 'RGB')
+
+            # If resolution is provided, resize
+            if resolution:
+                final_image = final_image.resize((resolution, resolution))
 
 
-          # Save. Include leading zeros in file name to keep alphabetical order
-          max_frame_index = num_frame_batches * batch_size + batch_size
-          file_name = str((i*batch_size)+j)\
+            # Save. Include leading zeros in file name to keep alphabetical order
+            max_frame_index = num_frame_batches * batch_size + batch_size
+            file_name = str(image_index)\
                      .zfill(len(str(max_frame_index)))
-          final_image.save(os.path.join(self.frames_dir,file_name+'.png'))
+            final_image.save(os.path.join(self.frames_dir, file_name + '.png'))#, subsample=0, quality=95)
+        
+        del image_batch
+        del noise_batch
 
 
   def hallucinate(self,
