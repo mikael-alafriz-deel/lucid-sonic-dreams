@@ -22,6 +22,7 @@ from importlib import import_module
 from .helper_functions import * 
 from .sample_effects import *
 
+
 def import_stylegan_torch():
     # Clone Official StyleGAN2-ADA Repository
     if not os.path.exists('stylegan2'):
@@ -403,8 +404,9 @@ class LucidSonicDream:
 
       # Initialize vectors
       init_noise = [self.truncation * \
-                    truncnorm.rvs(-2, 2, 
-                                  size=(self.batch_size, self.input_shape)) \
+                    truncnorm.rvs(-2, 2,
+                                  size=(1, self.input_shape)) \
+                                  #size=(self.batch_size, self.input_shape)) \
                              .astype(np.float32)[0]\
                     for i in range(num_init_noise)]
 
@@ -494,7 +496,10 @@ class LucidSonicDream:
       self.class_vecs = full_frame_interpolation(class_frames_interp, 
                                             class_smooth_frames, 
                                             len(self.class_vecs))
-      
+    
+    # conver to numpy array:
+    self.noise = np.array(self.noise)
+    self.class_vecs = np.array(self.class_vecs)
 
   def setup_effects(self):
     '''Initializes effects to be applied to each frame'''
@@ -566,12 +571,30 @@ class LucidSonicDream:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # dataloader
+    class MusicDataset(torch.utils.data.Dataset):
+        def __init__(self, tensor_list):
+            self.tensor_list = tensor_list
+
+        def __getitem__(self, i):
+            return [t[i] for t in self.tensor_list]
+        
+        def __len__(self):
+            return len(self.tensor_list[0])
+
+
+    ds = MusicDataset([torch.from_numpy(self.noise), torch.from_numpy(self.class_vecs)])
+    dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, pin_memory=True, shuffle=False, num_workers=4)
+
+    final_images = []
+    file_names = []
+
     # Generate frames
-    for i in tqdm(range(num_frame_batches), position=0, leave=True):
+    for i, (noise_batch, class_batch) in enumerate(tqdm(dl)):#i in tqdm(range(num_frame_batches), position=0, leave=True):
 
         # Obtain batches of Noise and Class vectors based on batch_size
-        noise_batch = np.array(self.noise[i*batch_size:(i+1)*batch_size])
-        class_batch = np.array(self.class_vecs[i*batch_size:(i+1)*batch_size])
+        #noise_batch = self.noise[i * batch_size: (i + 1) * batch_size]
+        #class_batch = self.class_vecs[i * batch_size: (i + 1) * batch_size]
 
         # If style is a custom function, pass batches to the function
         if callable(self.style): 
@@ -580,19 +603,22 @@ class LucidSonicDream:
         # Otherwise, generate frames with StyleGAN(2)
         else:
             if self.use_tf:
+                noise_batch = noise_batch.numpy()
+                class_batch = class_batch.numpy()
                 w_batch = self.Gs.components.mapping.run(noise_batch, np.tile(class_batch, (batch_size, 1)))
                 image_batch = self.Gs.components.synthesis.run(w_batch, **Gs_syn_kwargs)
             else:
-                noise_batch = torch.from_numpy(noise_batch).to(device)
-                w_batch = self.Gs.mapping(noise_batch, class_batch)
+                noise_batch = noise_batch.to(device)
                 with torch.no_grad():
-                    image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs).detach().cpu()
+                    w_batch = self.Gs.mapping(noise_batch, class_batch.to(device))
+                    image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs)
+                image_batch = (image_batch.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0).cpu()
 
         # For each image in generated batch: apply effects, resize, and save
         for j, image in enumerate(image_batch): 
             image_index = (i * batch_size) + j
-            if not self.use_tf:
-                image = (image.permute(1, 2, 0) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
+            #if not self.use_tf:
+            #    image = (image.permute(1, 2, 0) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
             array = np.array(image)
 
             # Apply efects
@@ -609,12 +635,17 @@ class LucidSonicDream:
 
             # Save. Include leading zeros in file name to keep alphabetical order
             max_frame_index = num_frame_batches * batch_size + batch_size
-            file_name = str(image_index)\
-                     .zfill(len(str(max_frame_index)))
-            final_image.save(os.path.join(self.frames_dir, file_name + '.png'))#, subsample=0, quality=95)
+            file_name = str(image_index).zfill(len(str(max_frame_index)))
+        
+            file_names.append(file_name)
+            final_images.append(final_image)
+            #final_image.save(os.path.join(self.frames_dir, file_name + '.png'))#, subsample=0, quality=95)
         
         del image_batch
         del noise_batch
+
+    for file_name, final_image in zip(file_names, final_images):
+        final_image.save(os.path.join(self.frames_dir, file_name + '.jpg'), subsample=0, quality=95)
 
 
   def hallucinate(self,
