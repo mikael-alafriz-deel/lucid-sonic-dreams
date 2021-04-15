@@ -67,7 +67,8 @@ class LucidSonicDream:
                flash_audio: str = None,
                style: str = 'wikiart',
                input_shape: int = None,
-               num_possible_classes: int = None): 
+               num_possible_classes: int = None,
+               ): 
 
       # If style is a function, raise exception if function does not take 
       # noise_batch or class_batch parameters
@@ -240,7 +241,7 @@ class LucidSonicDream:
                                          duration=duration)
     
     # Calculate frame duration (i.e. samples per frame)
-    frame_duration = int(sr/fps - (sr/fps % 64))
+    frame_duration = int(sr / fps - (sr / fps % 64))
 
     # Generate normalized spectrograms for Pulse, Motion and Class
     self.spec_norm_pulse = get_spec_norm(wav_pulse, sr_pulse, 
@@ -295,9 +296,9 @@ class LucidSonicDream:
     current_noise = self.current_noise
 
     # For each current value in noise vector, change direction if absolute 
-    # value +/- motion_react is larger than 2*truncation
-    update = lambda cn, ms: 1 if cn - m < -2*t else \
-                           -1 if cn + m >= 2*t else ms
+    # value +/- motion_react is larger than 2 * truncation
+    update = lambda cn, ms: 1 if cn - m < -2 * t else \
+                           -1 if cn + m >= 2 * t else ms
     update_vec = np.vectorize(update)
 
     return update_vec(current_noise, motion_signs)
@@ -373,7 +374,6 @@ class LucidSonicDream:
 
   def generate_vectors(self):
     '''Generates noise and class vectors as inputs for each frame'''
-
     PULSE_SMOOTH = 0.75
     MOTION_SMOOTH = 0.75
     classes = self.classes
@@ -384,30 +384,19 @@ class LucidSonicDream:
     motion_react = self.motion_react * 20 / fps
 
     # Get number of noise vectors to initialize (based on speed_fpm)
-    num_init_noise = round(
-        librosa.get_duration(self.wav, 
-                             self.sr)/60*self.speed_fpm)
+    num_init_noise = round(librosa.get_duration(self.wav, self.sr) / 60 * self.speed_fpm)
     
     # If num_init_noise < 2, simply initialize the same 
     # noise vector for all frames 
     if num_init_noise < 2:
-
-      noise = [self.truncation * \
-               truncnorm.rvs(-2, 2, 
-                             size = (self.batch_size, self.input_shape)) \
-                        .astype(np.float32)[0]] * \
-              len(self.spec_norm_class)
+        noise = [self.truncation * truncnorm.rvs(-2, 2, size=(self.batch_size, self.input_shape)).astype(np.float32)[0]] * \
+                 len(self.spec_norm_class)
 
     # Otherwise, initialize num_init_noise different vectors, and generate
     # linear interpolations between these vectors
     else: 
-
       # Initialize vectors
-      init_noise = [self.truncation * \
-                    truncnorm.rvs(-2, 2,
-                                  size=(1, self.input_shape)) \
-                                  #size=(self.batch_size, self.input_shape)) \
-                             .astype(np.float32)[0]\
+      init_noise = [self.truncation * truncnorm.rvs(-2, 2, size=(1, self.input_shape)).astype(np.float32)[0] \
                     for i in range(num_init_noise)]
 
       # Compute number of steps between each pair of vectors
@@ -438,11 +427,10 @@ class LucidSonicDream:
     
 
     for i in range(len(self.spec_norm_class)):
-
       # UPDATE NOISE # 
 
       # Re-initialize randomness factors every 4 seconds
-      if i % round(fps*4) == 0:
+      if i % round(fps * 4) == 0:
         rand_factors = np.array([random.choice([1, 1-self.motion_randomness]) \
                              for n in range(self.input_shape)])
 
@@ -607,45 +595,35 @@ class LucidSonicDream:
                 class_batch = class_batch.numpy()
                 w_batch = self.Gs.components.mapping.run(noise_batch, np.tile(class_batch, (batch_size, 1)))
                 image_batch = self.Gs.components.synthesis.run(w_batch, **Gs_syn_kwargs)
+                image_batch = np.array(image_batch)
             else:
                 noise_batch = noise_batch.to(device)
                 with torch.no_grad():
-                    w_batch = self.Gs.mapping(noise_batch, class_batch.to(device))
+                    w_batch = self.Gs.mapping(noise_batch, class_batch.to(device), truncation_psi=self.truncation_psi)
                     image_batch = self.Gs.synthesis(w_batch, **Gs_syn_kwargs)
-                image_batch = (image_batch.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0).cpu()
+                image_batch = (image_batch.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0).cpu().numpy()
 
         # For each image in generated batch: apply effects, resize, and save
-        for j, image in enumerate(image_batch): 
+        for j, array in enumerate(image_batch): 
             image_index = (i * batch_size) + j
-            #if not self.use_tf:
-            #    image = (image.permute(1, 2, 0) * 127.5 + 128).clamp(0, 255).to(torch.uint8).squeeze(0)
-            array = np.array(image)
 
             # Apply efects
             for effect in self.custom_effects:
-                array = effect.apply_effect(array = array, 
-                                            index = image_index)
-
-            final_image = Image.fromarray(array, 'RGB')
-
-            # If resolution is provided, resize
-            if resolution:
-                final_image = final_image.resize((resolution, resolution))
-
+                array = effect.apply_effect(array=array, index=image_index)
 
             # Save. Include leading zeros in file name to keep alphabetical order
             max_frame_index = num_frame_batches * batch_size + batch_size
             file_name = str(image_index).zfill(len(str(max_frame_index)))
         
             file_names.append(file_name)
-            final_images.append(final_image)
-            #final_image.save(os.path.join(self.frames_dir, file_name + '.png'))#, subsample=0, quality=95)
-        
-        del image_batch
-        del noise_batch
+            final_images.append(array)
 
     for file_name, final_image in zip(file_names, final_images):
-        final_image.save(os.path.join(self.frames_dir, file_name + '.jpg'), subsample=0, quality=95)
+        with Image.fromarray(final_image, 'RGB') as final_image_PIL:
+            # If resolution is provided, resize
+            if resolution:
+                final_image_PIL = final_image_PIL.resize((resolution, resolution))
+            final_image_PIL.save(os.path.join(self.frames_dir, file_name + '.jpg'), subsample=0, quality=95)
 
 
   def hallucinate(self,
@@ -677,33 +655,31 @@ class LucidSonicDream:
                   contrast_percussive: bool = None,
                   flash_strength: float = None,
                   flash_percussive: bool = None,
-                  custom_effects: list = None):
+                  custom_effects: list = None,
+                  truncation_psi: float = 1.0):
     '''Full pipeline of video generation'''
 
-    # Raise exception if speed_fpm > fps*60
-    if speed_fpm > fps*60:
-      sys.exit('speed_fpm must not be greater than fps * 60')
+    # Raise exception if speed_fpm > fps * 60
+    if speed_fpm > fps * 60:
+        sys.exit('speed_fpm must not be greater than fps * 60')
     
     # Raise exception if element of custom_effects is not EffectsGenerator
     if custom_effects:
-      if not all(isinstance(effect, EffectsGenerator) \
-                  for effect in custom_effects):
-        sys.exit('Elements of custom_effects must be EffectsGenerator objects')
+        if not all(isinstance(effect, EffectsGenerator) for effect in custom_effects):
+            sys.exit('Elements of custom_effects must be EffectsGenerator objects')
 
     # Raise exception of classes is an empty list
     if classes:
-      if len(classes) == 0:
-        sys.exit('classes must be NoneType or list with length > 0')
+        if len(classes) == 0:
+            sys.exit('classes must be NoneType or list with length > 0')
 
     # Raise exception if any of the following parameters are not betwee 0 and 1
     for param in ['motion_randomness', 'truncation','class_shuffle_strength', 
                   'contrast_strength', 'flash_strength']:
-
         if (locals()[param]) and not (0 <= locals()[param] <= 1):
-          sys.exit('{} must be between 0 and 1'.format(param))
+            sys.exit('{} must be between 0 and 1'.format(param))
 
-    self.file_name = file_name if file_name[-4:] == '.mp4' \
-                     else file_name + '.mp4'
+    self.file_name = file_name if file_name[-4:] == '.mp4' else file_name + '.mp4'
     self.resolution = resolution
     self.batch_size = batch_size
     self.speed_fpm = speed_fpm
@@ -723,16 +699,15 @@ class LucidSonicDream:
     self.flash_strength = flash_strength
     self.flash_percussive = flash_percussive
     self.custom_effects = custom_effects 
+    # stylegan2 params
+    self.truncation_psi = truncation_psi
 
     # Initialize style
     if not self.style_exists:
-
-      print('Preparing style...')
-
-      if not callable(self.style):
-        self.stylegan_init()
-
-      self.style_exists = True
+        print('Preparing style...')
+        if not callable(self.style):
+          self.stylegan_init()
+        self.style_exists = True
 
     # If there are changes in any of the following parameters,
     # re-initialize audio
@@ -749,17 +724,16 @@ class LucidSonicDream:
                  (self.motion_percussive != motion_harmonic)]
 
     if any(cond_list):
-      
-      self.fps = fps
-      self.start = start
-      self.duration = duration 
-      self.pulse_percussive = pulse_percussive
-      self.pulse_harmonic = pulse_harmonic
-      self.motion_percussive = motion_percussive
-      self.motion_harmonic = motion_harmonic
+        self.fps = fps
+        self.start = start
+        self.duration = duration 
+        self.pulse_percussive = pulse_percussive
+        self.pulse_harmonic = pulse_harmonic
+        self.motion_percussive = motion_percussive
+        self.motion_harmonic = motion_harmonic
 
-      print('Preparing audio...')
-      self.load_specs()
+        print('Preparing audio...')
+        self.load_specs()
 
     # Initialize effects
     print('Loading effects...')
@@ -778,18 +752,16 @@ class LucidSonicDream:
 
     # Load output audio
     if output_audio:
-      wav_output, sr_output = librosa.load(output_audio, offset=start, 
-                                           duration=duration)
+        wav_output, sr_output = librosa.load(output_audio, offset=start, duration=duration)
     else:
-      wav_output, sr_output = self.wav, self.sr
+        wav_output, sr_output = self.wav, self.sr
 
     # Write temporary audio file
     soundfile.write('tmp.wav',wav_output, sr_output)
 
     # Generate final video
-    audio = mpy.AudioFileClip('tmp.wav', fps = self.sr*2)
-    video = mpy.ImageSequenceClip(self.frames_dir, 
-                                  fps=self.sr/self.frame_duration)
+    audio = mpy.AudioFileClip('tmp.wav', fps=self.sr * 2)
+    video = mpy.ImageSequenceClip(self.frames_dir, fps=self.sr / self.frame_duration)
     video = video.set_audio(audio)
     video.write_videofile(file_name,audio_codec='aac')
 
