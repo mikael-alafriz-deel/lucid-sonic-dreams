@@ -57,6 +57,17 @@ def show_styles():
     print(*styles, sep='\n')
 
 
+class MultiTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, tensor_list):
+        self.tensor_list = tensor_list
+
+    def __getitem__(self, i):
+        return [t[i] for t in self.tensor_list]
+
+    def __len__(self):
+        return len(self.tensor_list[0])
+
+
 class LucidSonicDream:
   def __init__(self, 
                song: str,
@@ -557,33 +568,16 @@ class LucidSonicDream:
         shutil.rmtree(self.frames_dir)
     os.makedirs(self.frames_dir)
 
+    # create dataloader
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # dataloader
-    class MusicDataset(torch.utils.data.Dataset):
-        def __init__(self, tensor_list):
-            self.tensor_list = tensor_list
-
-        def __getitem__(self, i):
-            return [t[i] for t in self.tensor_list]
-        
-        def __len__(self):
-            return len(self.tensor_list[0])
-
-
-    ds = MusicDataset([torch.from_numpy(self.noise), torch.from_numpy(self.class_vecs)])
+    ds = MultiTensorDataset([torch.from_numpy(self.noise), torch.from_numpy(self.class_vecs)])
     dl = torch.utils.data.DataLoader(ds, batch_size=batch_size, pin_memory=True, shuffle=False, num_workers=4)
 
     final_images = []
     file_names = []
 
     # Generate frames
-    for i, (noise_batch, class_batch) in enumerate(tqdm(dl)):#i in tqdm(range(num_frame_batches), position=0, leave=True):
-
-        # Obtain batches of Noise and Class vectors based on batch_size
-        #noise_batch = self.noise[i * batch_size: (i + 1) * batch_size]
-        #class_batch = self.class_vecs[i * batch_size: (i + 1) * batch_size]
-
+    for i, (noise_batch, class_batch) in enumerate(tqdm(dl, position=0, desc="Generating frames")):
         # If style is a custom function, pass batches to the function
         if callable(self.style): 
             image_batch = self.style(noise_batch=noise_batch, 
@@ -617,9 +611,18 @@ class LucidSonicDream:
         
             file_names.append(file_name)
             final_images.append(array)
+            
+            
+        if len(final_images) > 1000:
+            self.store_imgs(file_names, final_images, resolution)
+            file_names = []
+            final_images = []
+    if len(final_images) > 0:
+        self.store_imgs(file_names, final_images, resolution)
 
-    for file_name, final_image in zip(file_names, final_images):
-        with Image.fromarray(final_image, 'RGB') as final_image_PIL:
+  def store_imgs(self, file_names, final_images, resolution):
+    for file_name, final_image in tqdm(zip(file_names, final_images), position=1, leave=False, desc="Storing frames", total=len(file_names)):
+        with Image.fromarray(final_image, mode='RGB') as final_image_PIL:
             # If resolution is provided, resize
             if resolution:
                 final_image_PIL = final_image_PIL.resize((resolution, resolution))
