@@ -1,0 +1,11 @@
+# folders
+lucidsonicdreams/__pycache__/
+stylegan2/
+stylegan2_tf/
+*/.ipynb_checkpoints/
+.ipynb_checkpoints/
+# files
+*.mp3
+*.mp4
+*.pkl
+gen.py
