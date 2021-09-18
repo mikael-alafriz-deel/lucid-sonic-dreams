@@ -7,10 +7,9 @@ import inspect
 import numpy as np
 import random
 from scipy.stats import truncnorm
+import cv2
 
 import tensorflow as tf
-import PIL
-from PIL import Image
 import skimage.exposure
 import librosa
 import soundfile
@@ -491,19 +490,19 @@ class LucidSonicDream:
     '''Generate GAN output for each frame of video'''
 
     file_name = self.file_name
-    resolution = self.resolution
+    resolution = (
+        (self.resolution, self.resolution)
+        if self.resolution
+        else (self.Gs.img_resolution, self.Gs.img_resolution)
+    )
+    video_codec = cv2.VideoWriter_fourcc(*"mp4v")
+    video_out = cv2.VideoWriter("cv2_video.mp4", video_codec, self.fps, resolution)
     batch_size = self.batch_size
     num_frame_batches = int(len(self.noise)/batch_size)
     Gs_syn_kwargs = {'output_transform': {'func': convert_images_to_uint8, 
                                           'nchw_to_nhwc': True},
                     'randomize_noise': False,
                     'minibatch_size': batch_size}
-
-    # Set-up temporary frame directory
-    self.frames_dir = file_name.split('.mp4')[0] + '_frames'
-    if os.path.exists(self.frames_dir):
-      shutil.rmtree(self.frames_dir)
-    os.makedirs(self.frames_dir)
 
     # Generate frames
     for i in tqdm(range(num_frame_batches), position=0, leave=True):
@@ -537,18 +536,14 @@ class LucidSonicDream:
             array = effect.apply_effect(array = array, 
                                         index = (i*batch_size)+j)
             
-          final_image = Image.fromarray(array)
-
           # If resolution is provided, resize
           if resolution:
-            final_image = final_image.resize((resolution, resolution))
-
-
-          # Save. Include leading zeros in file name to keep alphabetical order
-          max_frame_index = num_frame_batches * batch_size + batch_size
-          file_name = str((i*batch_size)+j)\
-                     .zfill(len(str(max_frame_index)))
-          final_image.save(os.path.join(self.frames_dir,file_name+'.png'))
+            final_image = cv2.resize(array,resolution,cv2.INTER_CUBIC)
+          else:
+            final_image = array[:,:,::-1]
+          
+          video_out.write(final_image)
+    video_out.release()
 
 
   def hallucinate(self,
@@ -690,18 +685,14 @@ class LucidSonicDream:
     soundfile.write('tmp.wav',wav_output, sr_output)
 
     # Generate final video
-    audio = mpy.AudioFileClip('tmp.wav', fps = self.sr*2)
-    video = mpy.ImageSequenceClip(self.frames_dir, 
-                                  fps=self.sr/self.frame_duration)
+    audio = mpy.AudioFileClip("tmp.wav", fps=self.sr * 2)
+    video = mpy.VideoFileClip("cv2_video.mp4")
     video = video.set_audio(audio)
-    video.write_videofile(file_name,audio_codec='aac')
+    video.write_videofile(file_name, audio_codec="aac")
 
     # Delete temporary audio file
-    os.remove('tmp.wav')
-
-    # By default, delete temporary frames directory
-    if not save_frames: 
-      shutil.rmtree(self.frames_dir)
+    os.remove("tmp.wav")
+    os.remove("cv2_video.mp4")
 
 
 class EffectsGenerator:
